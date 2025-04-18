@@ -12,11 +12,14 @@ ui <- fluidPage(
       numericInput("learningRate", "Learning Rate (λ)", value = 0.1, step = 0.01),
       numericInput("output", "Output (Tons)", value = 10000),
       numericInput("worldPrice", "World Price ($)", value = 500),
-      numericInput("years", "Number of Years", value = 10, min = 1, max = 50)
+      numericInput("years", "Number of Years", value = 10, min = 1, max = 50),
+      numericInput("demandIntercept", "Demand Intercept (a)", value = 20000),
+      numericInput("demandSlope", "Demand Slope (b)", value = 20)
     ),
     
     mainPanel(
       plotOutput("costPlot"),
+      plotOutput("demandPlot"),
       tableOutput("costTable")
     )
   )
@@ -39,6 +42,13 @@ server <- function(input, output) {
     )
   })
   
+  demandData <- reactive({
+    prices <- seq(0, input$worldPrice * 1.5, length.out = 100)
+    quantities <- input$demandIntercept - input$demandSlope * prices
+    data.frame(Price = prices, Quantity = quantities)
+  })
+  
+  
   output$costPlot <- renderPlot({
     df <- costData()
     ggplot(df, aes(x = Year)) +
@@ -48,6 +58,17 @@ server <- function(input, output) {
       labs(y = "Price per Ton ($)", color = "Legend") +
       theme_minimal()
   })
+  
+  output$demandPlot <- renderPlot({
+    df <- demandData()
+    ggplot(df, aes(x = Quantity, y = Price)) +
+      geom_line(color = "blue", size = 1.2) +
+      geom_hline(yintercept = input$worldPrice, linetype = "dashed", color = "black") +
+      geom_hline(yintercept = input$worldPrice * (1 + input$tariff / 100), linetype = "dotted", color = "red") +
+      labs(title = "Demand Curve", x = "Quantity", y = "Price ($)") +
+      theme_minimal()
+  })
+  
   
   output$costTable <- renderTable({
     df <- costData()
