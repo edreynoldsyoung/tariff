@@ -20,6 +20,7 @@ ui <- fluidPage(
     mainPanel(
       plotOutput("costPlot"),
       plotOutput("demandPlot"),
+      tableOutput("econSummary"),
       tableOutput("costTable")
     )
   )
@@ -48,6 +49,46 @@ server <- function(input, output) {
     data.frame(Price = prices, Quantity = quantities)
   })
   
+  econData <- reactive({
+    # Demand parameters
+    a <- input$demandIntercept
+    b <- input$demandSlope
+    
+    # Prices
+    Pw <- input$worldPrice
+    Pt <- Pw * (1 + input$tariff / 100)
+    
+    # Average Cost from cost curve
+    t <- input$years
+    AC <- (input$fixedCost / input$output) + input$variableCost * exp(-input$learningRate * t)
+    
+    # Quantities at each price
+    Qd_w <- a - b * Pw
+    Qd_t <- a - b * Pt
+    Qs <- input$output  # Assume perfectly elastic supply at AC
+    
+    # Surplus calculations
+    # Area of triangle: (1/2) * base * height
+    CS_w <- 0.5 * Qd_w * (a / b - Pw)      # Without tariff
+    CS_t <- 0.5 * Qd_t * (a / b - Pt)      # With tariff
+    PS_t <- (Pt - AC) * Qs                 # Producer surplus only exists with tariff
+    DWL <- CS_w - CS_t - PS_t              # Deadweight loss
+    
+    list(
+      AC = AC,
+      Pw = Pw,
+      Pt = Pt,
+      Qd_w = Qd_w,
+      Qd_t = Qd_t,
+      Qs = Qs,
+      CS_w = CS_w,
+      CS_t = CS_t,
+      PS_t = PS_t,
+      DWL = DWL
+    )
+  })
+  
+  
   
   output$costPlot <- renderPlot({
     df <- costData()
@@ -60,13 +101,89 @@ server <- function(input, output) {
   })
   
   output$demandPlot <- renderPlot({
+    e <- econData()
     df <- demandData()
+    
+    # Define demand choke price (price at zero quantity)
+    choke_price <- input$demandIntercept / input$demandSlope
+    
+    # Ensure we have valid equilibrium quantities
+    Qd_t <- max(0, e$Qd_t)
+    Qs <- max(0, e$Qs)
+    
+    # 1. Consumer Surplus Polygon
+    cs_poly <- data.frame(
+      Quantity = c(0, Qd_t, 0),
+      Price = c(e$Pt, e$Pt, choke_price)
+    )
+    
+    # 2. Producer Surplus Polygon
+    ps_poly <- data.frame(
+      Quantity = c(0, Qs, Qs, 0),
+      Price = c(e$AC, e$AC, e$Pt, e$Pt)
+    )
+    
+    # 3. Deadweight Loss Polygon (triangle between Qs and Qd_t at tariff price)
+    # Only create this if Qd_t > Qs
+    dwl_poly <- if (Qd_t > Qs) {
+      data.frame(
+        Quantity = c(Qs, Qd_t, Qs),
+        Price = c(e$Pt, e$Pt, (input$demandIntercept - Qs) / input$demandSlope)
+      )
+    } else {
+      data.frame(Quantity = numeric(0), Price = numeric(0))
+    }
+    
     ggplot(df, aes(x = Quantity, y = Price)) +
+      # Demand curve
       geom_line(color = "blue", size = 1.2) +
-      geom_hline(yintercept = input$worldPrice, linetype = "dashed", color = "black") +
-      geom_hline(yintercept = input$worldPrice * (1 + input$tariff / 100), linetype = "dotted", color = "red") +
-      labs(title = "Demand Curve", x = "Quantity", y = "Price ($)") +
+      
+      # Add polygons if non-empty
+      {if (nrow(cs_poly) > 0) geom_polygon(data = cs_poly, aes(x = Quantity, y = Price), fill = "skyblue", alpha = 0.4) else NULL} +
+      {if (nrow(ps_poly) > 0) geom_polygon(data = ps_poly, aes(x = Quantity, y = Price), fill = "palegreen4", alpha = 0.5) else NULL} +
+      {if (nrow(dwl_poly) > 0) geom_polygon(data = dwl_poly, aes(x = Quantity, y = Price), fill = "orangered", alpha = 0.4) else NULL} +
+      
+      # Supply line (AC)
+      geom_hline(yintercept = e$AC, linetype = "solid", color = "darkgreen", size = 1) +
+      
+      # Price lines
+      geom_hline(yintercept = e$Pw, linetype = "dashed", color = "black") +
+      geom_hline(yintercept = e$Pt, linetype = "dotted", color = "red") +
+      
+      # Equilibrium points
+      geom_point(aes(x = e$Qd_w, y = e$Pw), color = "black", size = 3) +
+      geom_point(aes(x = Qd_t, y = e$Pt), color = "red", size = 3) +
+      
+      # Annotations
+      annotate("text", x = Qd_t + 300, y = e$Pt + 10, label = "With Tariff", color = "red") +
+      annotate("text", x = e$Qd_w + 300, y = e$Pw + 10, label = "No Tariff", color = "black") +
+      annotate("text", x = Qs / 2, y = e$Pt + 40, label = "Consumer Surplus", color = "blue") +
+      annotate("text", x = Qs / 2, y = e$AC - 20, label = "Producer Surplus", color = "darkgreen") +
+      annotate("text", x = Qs + 200, y = e$Pt + 20, label = "Deadweight Loss", color = "orangered") +
+      
+      # Final plot setup
+      labs(
+        title = "Surplus Analysis with Tariff",
+        x = "Quantity",
+        y = "Price ($)"
+      ) +
+      coord_cartesian(xlim = c(0, max(df$Quantity, Qd_t + 1000)), ylim = c(0, max(df$Price, e$Pt + 50))) +
       theme_minimal()
+  })
+  
+  
+  
+  output$econSummary <- renderTable({
+    e <- econData()
+    data.frame(
+      `Avg Cost` = round(e$AC, 2),
+      `World Price` = e$Pw,
+      `Tariff Price` = e$Pt,
+      `Consumer Surplus (No Tariff)` = round(e$CS_w, 0),
+      `Consumer Surplus (With Tariff)` = round(e$CS_t, 0),
+      `Producer Surplus (With Tariff)` = round(e$PS_t, 0),
+      `Deadweight Loss` = round(e$DWL, 0)
+    )
   })
   
   
