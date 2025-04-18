@@ -72,7 +72,7 @@ server <- function(input, output) {
     CS_w <- 0.5 * Qd_w * (a / b - Pw)      # Without tariff
     CS_t <- 0.5 * Qd_t * (a / b - Pt)      # With tariff
     PS_t <- (Pt - AC) * Qs                 # Producer surplus only exists with tariff
-    DWL <- CS_w - CS_t - PS_t              # Deadweight loss
+    DWL <- max(0, CS_w - CS_t - PS_t)      # Deadweight loss
     
     list(
       AC = AC,
@@ -112,10 +112,20 @@ server <- function(input, output) {
     Qs <- max(0, e$Qs)
     
     # 1. Consumer Surplus Polygon
-    cs_poly <- data.frame(
-      Quantity = c(0, Qd_t, 0),
-      Price = c(e$Pt, e$Pt, choke_price)
-    )
+    # Consumer Loss Polygon: area between demand curve and price lines from Q_t to Q_w
+    Qd_t <- max(0, e$Qd_t)
+    Qd_w <- max(0, e$Qd_w)
+    
+    # Build a polygon only if Qd_w > Qd_t
+    cs_loss_poly <- if (Qd_w > Qd_t) {
+      data.frame(
+        Quantity = c(Qd_t, Qd_w, Qd_w, Qd_t),
+        Price = c(e$Pt, e$Pt, e$Pw, e$Pw)
+      )
+    } else {
+      data.frame(Quantity = numeric(0), Price = numeric(0))
+    }
+    
     
     # 2. Producer Surplus Polygon
     ps_poly <- data.frame(
@@ -139,7 +149,7 @@ server <- function(input, output) {
       geom_line(color = "blue", size = 1.2) +
       
       # Add polygons if non-empty
-      {if (nrow(cs_poly) > 0) geom_polygon(data = cs_poly, aes(x = Quantity, y = Price), fill = "skyblue", alpha = 0.4) else NULL} +
+      {if (nrow(cs_loss_poly) > 0) geom_polygon(data = cs_loss_poly, aes(x = Quantity, y = Price), fill = "skyblue", alpha = 0.4) else NULL} +
       {if (nrow(ps_poly) > 0) geom_polygon(data = ps_poly, aes(x = Quantity, y = Price), fill = "palegreen4", alpha = 0.5) else NULL} +
       {if (nrow(dwl_poly) > 0) geom_polygon(data = dwl_poly, aes(x = Quantity, y = Price), fill = "orangered", alpha = 0.4) else NULL} +
       
@@ -157,7 +167,7 @@ server <- function(input, output) {
       # Annotations
       annotate("text", x = Qd_t + 300, y = e$Pt + 10, label = "With Tariff", color = "red") +
       annotate("text", x = e$Qd_w + 300, y = e$Pw + 10, label = "No Tariff", color = "black") +
-      annotate("text", x = Qs / 2, y = e$Pt + 40, label = "Consumer Surplus", color = "blue") +
+      annotate("text", x = Qs / 2, y = e$Pt + 40, label = "Consumer Loss", color = "blue") +
       annotate("text", x = Qs / 2, y = e$AC - 20, label = "Producer Surplus", color = "darkgreen") +
       annotate("text", x = Qs + 200, y = e$Pt + 20, label = "Deadweight Loss", color = "orangered") +
       
@@ -179,9 +189,8 @@ server <- function(input, output) {
       `Avg Cost` = round(e$AC, 2),
       `World Price` = e$Pw,
       `Tariff Price` = e$Pt,
-      `Consumer Surplus (No Tariff)` = round(e$CS_w, 0),
-      `Consumer Surplus (With Tariff)` = round(e$CS_t, 0),
-      `Producer Surplus (With Tariff)` = round(e$PS_t, 0),
+      `Consumer Loss` = round(e$CS_w - e$CS_t, 0),
+      `Producer Surplus` = round(e$PS_t, 0),
       `Deadweight Loss` = round(e$DWL, 0)
     )
   })
